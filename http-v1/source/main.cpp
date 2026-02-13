@@ -27,6 +27,8 @@ int main()
     printf("写位置地址:%p\n", buf2.GetWritePosition());
     buf2.Print();
 
+    INF_LOG("11111111111");
+    DBG_LOG("%s", "asdasd");
 
     std::string tmp = buf.ReadToStringAndPop(buf.GetReadableSize());
     std::cout << tmp << std::endl;

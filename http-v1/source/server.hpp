@@ -2,12 +2,30 @@
 #include <cstdint>
 #include <cassert>
 #include <cstring>
+#include <ctime>
 
 #include <string>
 #include <vector>
 
 
 #define DEFAULT_BUFFER_SIZE 1024 // TODO: C++为何还要用宏?
+
+// TODO: 日志宏
+#define INF 0
+#define DBG 1
+#define ERR 2
+#define LOG_LEVEL DBG // 控制打印信息级别
+#define LOG(level, format, ...) do{\
+    if(level < LOG_LEVEL) break;\
+    time_t t = time(nullptr);\
+    struct tm* tm_info = localtime(&t);\
+    char tmp[32] = {0};\
+    strftime(tmp, 31, "%H:%M:%S", tm_info);\
+    fprintf(stdout, "[%s %s--%d]: " format "\n", tmp, __FILE__, __LINE__, ##__VA_ARGS__);\
+} while(0)
+#define INF_LOG(format, ...) LOG(INF, format, ##__VA_ARGS__)
+#define DBG_LOG(format, ...) LOG(DBG, format, ##__VA_ARGS__)
+#define ERR_LOG(format, ...) LOG(ERR, format, ##__VA_ARGS__)
 
 class Buffer
 {
@@ -160,7 +178,7 @@ public:
     }
     std::string ReadToStringAndPop(uint64_t size)
     {
-        assert(size <= GetReadableSize())
+        assert(size <= GetReadableSize());
         std::string str = ReadToString(size);
         MoveReadPosition(size);
         return str;
