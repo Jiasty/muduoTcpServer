@@ -2,7 +2,8 @@
 
 std::unordered_map<uint64_t, ConnectionPtr> _conns; // 管理所有连接
 uint64_t conn_id = 0;
-EventLoop loop;
+EventLoop base_loop; // 主线程使用
+LoopThreadPool* loop_poll;
 
 void ConnectionDestroy(const ConnectionPtr& conn)
 {
@@ -27,8 +28,8 @@ void OnMessage(const ConnectionPtr& conn, Buffer* buf)
 void NewConnection(int fd)
 {
     conn_id++;
-    
-    ConnectionPtr connection(new Connection(conn_id, fd, &loop));
+
+    ConnectionPtr connection(new Connection(conn_id, fd, loop_poll->NextLoop()));
     // SetReadCallback的参数是EventCallBack(参数是空的可调用对象)
     // TODO: std::placeholders是怎么传参的?
     connection->SetMessageCallBack(std::bind(OnMessage, std::placeholders::_1, std::placeholders::_2));
@@ -37,28 +38,24 @@ void NewConnection(int fd)
     connection->EnableInactiveRelease(10); // 启动非活跃释放
     connection->Established(); // 就绪初始化
     _conns.insert(std::make_pair(conn_id, connection)); // {conn_id, connection}
+
+    DBG_LOG("NEW THREAD------------");
 }
 
 
 int main()
 {
+    loop_poll = new LoopThreadPool(&base_loop);
+    loop_poll->SetThreadCount(2);
+    loop_poll->Create();
+
     // Poller poller; // "大堂经理揽客"
-    Acceptor acceptor(&loop, 8080);
+    Acceptor acceptor(&base_loop, 8080);
     // 回调函数中获取新链接，为新连接创建Channel并添加监控
     acceptor.SetAcceptCallBack(std::bind(NewConnection, std::placeholders::_1));
     acceptor.Listen(); // TODO: s回调后再开始监听
 
-    while(1)
-    {
-        loop.Start();
-
-        // std::vector<Channel*> actives;
-        // poller.Poll(&actives);
-        // for(auto& a : actives)
-        // {
-        //     a->HandleEvent();
-        // }
-    }
+    base_loop.Start(); // Start()内部死循环
 
     return 0;
 }

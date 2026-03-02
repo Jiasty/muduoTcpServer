@@ -1,9 +1,11 @@
+#pragma once
 #include <iostream>
 #include <functional>
-#include <mutex>
-#include <thread>
 #include <memory>
 #include <typeinfo>
+#include <mutex>
+#include <thread>
+#include <condition_variable>
 #include <cstdint>
 #include <cassert>
 #include <cstring>
@@ -23,6 +25,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h> // htons 所在的头文件
 #include <fcntl.h>
+#include <signal.h>
 
 
 
@@ -40,7 +43,7 @@
     struct tm* tm_info = localtime(&t);\
     char tmp[32] = {0};\
     strftime(tmp, 31, "%H:%M:%S", tm_info);\
-    fprintf(stdout, "[%s %s--%d]: " format "\n", tmp, __FILE__, __LINE__, ##__VA_ARGS__);\
+    fprintf(stdout, "[%p %s %s--%d]: " format "\n", (void*)pthread_self(), tmp, __FILE__, __LINE__, ##__VA_ARGS__);\
 } while(0)
 #define INF_LOG(format, ...) LOG(INF, format, ##__VA_ARGS__)
 #define DBG_LOG(format, ...) LOG(DBG, format, ##__VA_ARGS__)
@@ -945,16 +948,19 @@ public:
     // 事件监控-->就绪事件处理-->执行任务
     void Start()
     {
-        // 1、事件监控
-        std::vector<Channel*> actives;
-        _poller.Poll(&actives);
-        // 2、就绪事件处理
-        for (auto& channel : actives)
+        while(1)
         {
-            channel->HandleEvent();
+            // 1、事件监控
+            std::vector<Channel*> actives;
+            _poller.Poll(&actives);
+            // 2、就绪事件处理
+            for (auto& channel : actives)
+            {
+                channel->HandleEvent();
+            }
+            // 3、执行任务
+            RunAllTask();
         }
-        // 3、执行任务
-        RunAllTask();
     }
 
 private:
@@ -1270,6 +1276,176 @@ private:
     AcceptorCallBack _accept_cbFunc;
 };
 
+
+class LoopThread
+{
+private:
+    // 实例化EventLoop对象，并开始运行EventLoop模块的功能
+    void ThreadEntry()
+    {
+        EventLoop loop; // 生命周期随LoopThread对象
+        {
+            std::unique_lock<std::mutex> lock(_mutex);
+            _loop = &loop;
+            _cond.notify_all(); // TODO: _cond.notify_all()
+        }
+        loop.Start();
+    }
+public:
+    // 创建线程，设定线程入口函数
+    LoopThread()
+        : _loop(nullptr) 
+        , _thread(std::bind(&LoopThread::ThreadEntry, this))
+    {}
+    // 返回当前线程关联的EventLoop对象指针
+    EventLoop* GetLoop()
+    {
+        EventLoop* loop = nullptr;
+        {
+            std::unique_lock<std::mutex> lock(_mutex); // TODO: std::unique_lock<std::mutex>
+            _cond.wait(lock, [&](){ return _loop != nullptr; }); // TODO: _cond.wait and lambda
+        }
+        loop = _loop;
+        return loop;
+    }
+private:
+    // 实现_loop获取的同步关系，避免EventLoop创建还未实例化就被外界获取_loop
+    std::mutex _mutex; // 互斥锁
+    std::condition_variable _cond; // 条件变量
+
+    EventLoop* _loop; // 在线程内部实例化
+    std::thread _thread; // EventLoop对应的线程
+
+};
+
+class LoopThreadPool
+{
+public:
+    LoopThreadPool(EventLoop* base_loop)
+        : _thread_count(0)
+        , _next_loop_index(0)
+        , _base_loop(base_loop)
+    {}
+
+    void SetThreadCount(int count) { _thread_count = count; }
+    void Create()
+    {
+        if(_thread_count > 0)
+        {
+            _threads.resize(_thread_count);
+            _loops.resize(_thread_count);
+            for(int i = 0; i < _thread_count; i++)
+            {
+                _threads[i] = new LoopThread();
+                _loops[i] = _threads[i]->GetLoop(); // TODO: 他们的关系
+            }
+        }
+    }
+    EventLoop* NextLoop()
+    {
+        if(_thread_count == 0) return _base_loop; // 从属线程数为0，所有操作都在主线程
+        _next_loop_index = (_next_loop_index + 1) % _thread_count;
+        return _loops[_next_loop_index];
+    }
+
+private:
+    int _thread_count; // 从属线程的数量
+    int _next_loop_index;
+    EventLoop* _base_loop; // 主EventLoop,运行在主线程。无从属线程则所有操作都在此
+    std::vector<LoopThread*> _threads; // 所有(从属?)LoopThread对象
+    std::vector<EventLoop*> _loops; // 从属线程数量大于0才从_loops中分配EventLoop对象
+};
+
+class TcpServer
+{
+private:
+    // 为新连接构造一个Connection进行管理
+    void NewConnection(int fd)
+    {
+        _next_id++;
+
+        ConnectionPtr connection(new Connection(_next_id, fd, _pool.NextLoop()));
+        connection->SetMessageCallBack(_message_cbFunc);
+        connection->SetClosedCallBack(_closed_cbFunc);
+        connection->SetConnectedCallBack(_connected_cbFunc);
+        connection->SetAnyEventCallBack(_any_event_cbFunc);
+        connection->SetServerClosedCallBack(std::bind(&TcpServer::RemoveConnection, this, std::placeholders::_1));
+        if(_enable_inactive_release) connection->EnableInactiveRelease(10); // 启动非活跃释放
+        connection->Established(); // 就绪初始化
+        _conns.insert(std::make_pair(_next_id, connection)); // {_next_id, connection}
+
+        DBG_LOG("NEW THREAD------------");
+    }
+    // 从管理Connection的_conns中删除连接信息
+    void RemoveConnectionInLoop(const ConnectionPtr& conn)
+    {
+        int id = conn->GetId();
+        auto it = _conns.find(id);
+        if(it != _conns.end()) _conns.erase(it);
+    }
+    void RemoveConnection(const ConnectionPtr& conn)
+    {
+        _base_loop.RunInLoop(std::bind(&TcpServer::RemoveConnectionInLoop, this, conn));
+    }
+
+    void RunAfterInLoop(const Functor& task, int delay)
+    {
+        _next_id++; // TODO
+        _base_loop.TimerAdd(_next_id, delay, task);
+    }
+public:
+    TcpServer(int port)
+        : _next_id(0)
+        , _port(port)
+        , _timeout(0)
+        , _enable_inactive_release(false)
+        , _acceptor(&_base_loop, _port)
+        , _pool(&_base_loop)
+    {
+        _acceptor.SetAcceptCallBack(std::bind(&TcpServer::NewConnection, this, std::placeholders::_1)); // TODO: 此处std::placeholders::_1?
+        _acceptor.Listen(); // 将监听套接字挂到baseloop上
+    }
+
+    // 设置回调函数
+    void SetConnectedCallBack(const ConnectedCallBack& cb) { _connected_cbFunc = cb; }
+    void SetMessageCallBack(const MessageCallBack& cb) { _message_cbFunc = cb; }
+    void SetClosedCallBack(const ClosedCallBack& cb) { _closed_cbFunc = cb; }
+    void SetAnyEventCallBack(const AnyEventCallBack& cb) { _any_event_cbFunc = cb; }
+
+    void SetThreadCount(int count) { _pool.SetThreadCount(count); }
+    void EnableInactiveRelease(int timeout)
+    {
+        _timeout = timeout;
+        _enable_inactive_release = true;
+    }
+    // 添加一个定时任务
+    void RunAfter(const Functor& task, int delay)
+    {
+        _base_loop.RunInLoop(std::bind(&TcpServer::RunAfterInLoop, this, task, delay));
+    }
+    void Start()
+    {
+        _pool.Create(); // 必须将SetThreadCount设置后再创建
+        _base_loop.Start();
+    }
+
+private:
+    uint64_t _next_id; // 自动增长的连接ID
+    int _port;
+    int _timeout; // 非活跃连接统计时间,到多少秒就超时
+    bool _enable_inactive_release; // 是否启动非活跃连接销毁
+    EventLoop _base_loop; // 主线程的EventLoop对象，负责监听事件处理
+    Acceptor _acceptor;
+    LoopThreadPool _pool; // 从属EventLoop线程池
+    std::unordered_map<uint64_t, ConnectionPtr> _conns; // 所有连接的管理
+
+    // 回调函数(组件使用者设置)
+    ConnectedCallBack _connected_cbFunc;
+    MessageCallBack _message_cbFunc;
+    ClosedCallBack _closed_cbFunc;
+    AnyEventCallBack _any_event_cbFunc;
+};
+
 // Channel类前声明Poller只知道有Poller类，但不知道里面的成员
 // 所以需要在Poller类之后进行类外实现
 void Channel::Update() { _loop->UpdateEvent(this); } // TODO: 后边会调用EventLoop接口
@@ -1283,3 +1459,15 @@ void TimeWheel::TimerRefresh(uint64_t id)
 
 void TimeWheel::TimerCancel(uint64_t id)
 { _loop->RunInLoop(std::bind(&TimeWheel::TimerCancelInLoop, this, id)); }
+
+
+class NetWork // TODO
+{
+public:
+    NetWork()
+    {
+        DBG_LOG("SIGPIPE INIT");
+        signal(SIGPIPE, SIG_IGN); // Linux注册信号处理函数的接口
+    }
+};
+static NetWork nw;

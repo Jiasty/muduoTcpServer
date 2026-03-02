@@ -1,9 +1,9 @@
-all:tcpServer tcpClient
-tcpServer:tcpServer.cpp
+all:server client
+server:server.cpp
 	g++ -std=c++11 $^ -o $@
-tcpClient:tcpClient.cpp
+client:tcpClient.cpp
 	g++ -std=c++11 $^ -o $@
 
 .POHNY:clean
 clean:
-	rm -rf tcpServer tcpClient
+	rm -rf server client
