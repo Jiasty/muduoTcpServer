@@ -1,4 +1,6 @@
-#pragma once
+#ifndef _MUDUO_SOURCE_HTTP_SERVER_H_
+#define _MUDUO_SOURCE_HTTP_SERVER_H_
+
 #include <iostream>
 #include <functional>
 #include <memory>
@@ -27,12 +29,9 @@
 #include <fcntl.h>
 #include <signal.h>
 
-
-
-#define DEFAULT_BUFFER_SIZE 1024 // TODO: C++为何还要用宏?
+#define DEFAULT_BUFFER_SIZE 1024
 #define MAX_LISTEN 128
 
-// TODO: 日志宏
 #define INF 0
 #define DBG 1
 #define ERR 2
@@ -53,76 +52,57 @@ class Buffer
 {
 public:
     Buffer()
-        :_buffer(DEFAULT_BUFFER_SIZE)
-        ,_read_index(0)
+        : _buffer(DEFAULT_BUFFER_SIZE)
+        , _read_index(0)
         , _write_index(0)
     {}
-    ~Buffer(){}
 
     // 获取起始地址
-    char* Begin() const { return (char*)&*_buffer.begin(); }
-    // 获取当前写位置地址
-    char* GetWritePosition() const
-    {
-        // 起始地址 + 写偏移
-        return Begin() + _write_index;
-    }
-    // 获取当前读位置地址
+    char* Begin() const { return (char*)&*_buffer.begin(); } // TODO: 或用_buffer.data()获取第一个元素的指针
+    // 获取当前写位置地址  起始地址 + 相对写偏移
+    char* GetWritePosition() const { return Begin() + _write_index; }
+    // 获取当前读位置地址  起始地址 + 相对读偏移
     char* GetReadPosition() const { return Begin() + _read_index; }
 
     // 获取可读空间大小
     uint64_t GetReadableSize() const { return _write_index - _read_index; }
-
-    // 确保可写空间足够(移动 or 扩容)
-    void EnsureWritableSize(uint64_t size)
-    {
-        if(size <= GetTailWritableSize())
-        {
-            // 末尾空间足够
-            return;
-        }
-        if(size <= GetTailWritableSize() + GetHeadWritableSize())
-        {
-            // 末尾加起始空间足够，将数据移动到起始位置
-            uint64_t readableSize = GetReadableSize();
-            std::copy(GetReadPosition(), GetReadPosition() + readableSize, Begin()); // 范围左闭右开
-            _read_index = 0;
-            _write_index = readableSize;
-        }
-        else
-        {
-            // 空间不够，直接在末尾扩容
-            _buffer.resize(_write_index + size); // TODO: 为何_write_index + size?
-        }
-    }
-
     // 获取前沿可写空间大小(可写位置往后的空间)
     uint64_t GetTailWritableSize() { return _buffer.size() - _write_index; }
     // 获取后沿可写空间大小(可读位置往前的空间)
     uint64_t GetHeadWritableSize() { return _read_index; }
 
-    // 将写位置向后移动指定长度
-    void MoveWritePosition(uint64_t size)
-    {
-        if(size > GetTailWritableSize())
-        {
-            std::cerr << "MoveWritePosition size exceed tail writable size" << std::endl;
-            return;
-        }
-        _write_index += size;
-    }
     // 将读位置向后移动指定长度
     void MoveReadPosition(uint64_t size)
     {
-        if(size > GetReadableSize())
-        {
-            std::cerr << "MoveReadPosition size exceed head readable size" << std::endl;
-            return;
-        }
+        assert(size <= GetReadableSize());
         _read_index += size;
     }
+    // 将写位置向后移动指定长度
+    void MoveWritePosition(uint64_t size)
+    {
+        assert(size <= GetTailWritableSize());
+        _write_index += size;
+    }
 
-    // 写入数据
+    // 确保可写空间足够(移动 or 扩容)
+    void EnsureWritableSize(uint64_t size)
+    {
+        // 末尾空间足够
+        if(size <= GetTailWritableSize()) return;
+        // 末尾加起始空间足够，将数据移动到起始位置
+        if(size <= GetTailWritableSize() + GetHeadWritableSize())
+        {
+            uint64_t readableSize = GetReadableSize();
+            // TODO: copy接口。范围左闭右开
+            std::copy(GetReadPosition(), GetReadPosition() + readableSize, Begin());
+            _read_index = 0;
+            _write_index = readableSize;
+        }
+        else _buffer.resize(_write_index + size); // 空间不够，直接在末尾扩容
+    }
+
+
+    // 写入数据 data写入this->_buffer
     void Write(const void* data, uint64_t size)
     {
         if(size == 0) return;
@@ -144,22 +124,18 @@ public:
         WriteString(data);
         MoveWritePosition(data.size());
     }
-    void WriteBuffer(const Buffer& data) // TODO
-    {
-        Write(data.GetReadPosition(), data.GetReadableSize());
-    }
-    void WriteBufferAndPush(const Buffer& data) // TODO
+    void WriteBuffer(const Buffer& data) { Write(data.GetReadPosition(), data.GetReadableSize()); }
+    void WriteBufferAndPush(const Buffer& data)
     {
         WriteBuffer(data);
         MoveWritePosition(data.GetReadableSize());
     }
 
-    // 读取数据
+    // 读取数据 this->_buffer写到buf输出型参数
     void Read(void* buf, uint64_t size)
     {
         // 确保要求读取数据大小小于等于可读数据大小
         assert(size <= GetReadableSize());
-
         // 拷贝数据
         std::copy(GetReadPosition(), GetReadPosition() + size, (char*)buf);
     }
@@ -176,7 +152,9 @@ public:
 
         std::string str;
         str.reserve(size);
-        Read(&str[0], size); // str.c_str()返回的是const char*
+        // Read是将数据写入buf, str.c_str()返回的是const char*, &str[0]使其退化为char*
+        // TODO: 此处也可以使用str.data() C++17重载非const版本
+        Read(&str[0], size);
         return str;
     }
     std::string ReadToStringAndPop(uint64_t size)
@@ -187,18 +165,19 @@ public:
         return str;
     }
 
+    // 寻找下一个换行符的位置(快速定位'\n',进而可以判断前面有无'\r')
     char* FindCRLF()
     {
-        char* ret = (char*)memchr(GetReadPosition(), '\n', GetReadableSize()); // TODO: memchr
+        // memchr无视'\0'，自己控制长度,而strchr就不行
+        char* ret = (char*)memchr(GetReadPosition(), '\n', GetReadableSize());
         return ret;
     }
+    // 获取一整行数据
     std::string GetLine()
     {
         char* pos = FindCRLF();
-        if(pos == nullptr)
-        {
-            return "";
-        }
+        if(pos == nullptr) return ""; // 数据可能分两次到达服务器,第一次没有'\n'
+        
         // +1是为了把'\n'也取出来
         return ReadToString(pos - GetReadPosition() + 1);
     }
@@ -218,10 +197,7 @@ public:
 
     void Print()
     {
-        for(auto e : _buffer)
-        {
-            std::cout << e;
-        }
+        for(auto e : _buffer) std::cout << e;
         std::cout << std::endl;
     }
 
@@ -549,19 +525,17 @@ public:
         if(_revents & EPOLLOUT)
         {
             // 不管什么事件都要调用
-            if(_any_callback) _any_callback(); 
             if(_write_callback) _write_callback(); // 放any后，一旦出错就会释放连接，就调不到任意回调了
         }
         else if(_revents & EPOLLERR)
         {
-            if(_any_callback) _any_callback();
             if(_error_callback) _error_callback();
         }
         else if(_revents & EPOLLHUP)
         {
-            if(_any_callback) _any_callback();
             if(_close_callback) _close_callback();
         }
+        if(_any_callback) _any_callback();
     }
 private:
     // Poller* _poller; // TODO: 事件循环对象指针，后续会调用EventLoop接口
@@ -1025,7 +999,7 @@ private:
             {
                 _message_cbFunc(shared_from_this(), &_in_buffer);
             }
-            return ReleaseInLoop(); // 这时候是真正的关闭
+            return Release(); // 这时候是真正的关闭
         }
 
         _out_buffer.MoveReadPosition(ret); // 发送成功，将读偏移往后移动!
@@ -1033,7 +1007,7 @@ private:
         {
             _channel.DisableWrite(); // 没有数据发送，关闭写事件监控 TODO
             // 如果当前是连接待关闭状态，有数据发完则释放连接，没有则直接释放
-            if(_status == DISCONNECTING && _out_buffer.GetReadableSize() == 0) return ReleaseInLoop();
+            if(_status == DISCONNECTING && _out_buffer.GetReadableSize() == 0) return Release();
         }
     }
 
@@ -1044,7 +1018,7 @@ private:
         {
             _message_cbFunc(shared_from_this(), &_in_buffer);
         }
-        return ReleaseInLoop();
+        return Release();
     }
 
     // 描述符触发出错事件
@@ -1093,7 +1067,7 @@ private:
     }
 
     // 并非实际发送窗口，而是把数据放到发送缓冲区，启动可写事件监控
-    void SendInLoop(const Buffer buf)
+    void SendInLoop(const Buffer& buf)
     {
         if(_status == DISCONNECTED) return;
         _out_buffer.WriteBufferAndPush(buf);
@@ -1114,7 +1088,7 @@ private:
             if(_channel.WriteAble() == false) _channel.EnableWrite();
             // TODO: 打开不发?
         }
-        if(_out_buffer.GetReadableSize() == 0) ReleaseInLoop();
+        if(_out_buffer.GetReadableSize() == 0) Release();
     }
 
     // 启动非活跃连接超时释放
@@ -1124,7 +1098,7 @@ private:
         _active_release = true; 
         // 2、添加定时销毁任务(存在则刷新)
         if(_loop->HasTimer(_conn_id)) return _loop->TimerRefresh(_conn_id);
-        _loop->TimerAdd(_conn_id, sec, std::bind(&Connection::ReleaseInLoop, this));
+        _loop->TimerAdd(_conn_id, sec, std::bind(&Connection::Release, this));
     }
 
     // 取消非活跃连接超时释放
@@ -1193,10 +1167,12 @@ public:
         // 因此执行的时候data指向的空间已经被释放
         Buffer buf;
         buf.WriteAndPush(data, len);
-        _loop->RunInLoop(std::bind(&Connection::SendInLoop, this, buf));
+        _loop->RunInLoop(std::bind(&Connection::SendInLoop, this, std::move(buf))); // TODO: move
     }
     // 提供给组件使用者的关闭接口，改变状态，并不实际关闭
     void Shutdown() { _loop->RunInLoop(std::bind(&Connection::ShutdownInLoop, this)); }
+    // 实际关闭接口 TODO
+    void Release() { _loop->QueueInLoop(std::bind(&Connection::ReleaseInLoop, this)); } 
     // 启动非活跃连接销毁
     void EnableInactiveRelease(int sec) {_loop->RunInLoop(std::bind(&Connection::EnableInactiveReleaseInLoop, this, sec));}
     // 取消非活跃连接销毁
@@ -1471,3 +1447,6 @@ public:
     }
 };
 static NetWork nw;
+
+
+#endif
