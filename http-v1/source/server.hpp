@@ -8,6 +8,7 @@
 #include <mutex>
 #include <thread>
 #include <condition_variable>
+#include <algorithm>
 #include <cstdint>
 #include <cassert>
 #include <cstring>
@@ -151,7 +152,7 @@ public:
         assert(size <= GetReadableSize());
 
         std::string str;
-        str.reserve(size);
+        str.resize(size);
         // Read是将数据写入buf, str.c_str()返回的是const char*, &str[0]使其退化为char*
         // TODO: 此处也可以使用str.data() C++17重载非const版本
         Read(&str[0], size);
