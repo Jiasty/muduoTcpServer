@@ -5,7 +5,145 @@
 #include <unistd.h>
 #include <regex>
 
-#define DEFAULT_TIMEOUT 30
+#define DEFAULT_TIMEOUT 10
+
+std::unordered_map<int, std::string> _status_msg = {
+    {100,  "Continue"},
+    {101,  "Switching Protocol"},
+    {102,  "Processing"},
+    {103,  "Early Hints"},
+    {200,  "OK"},
+    {201,  "Created"},
+    {202,  "Accepted"},
+    {203,  "Non-Authoritative Information"},
+    {204,  "No Content"},
+    {205,  "Reset Content"},
+    {206,  "Partial Content"},
+    {207,  "Multi-Status"},
+    {208,  "Already Reported"},
+    {226,  "IM Used"},
+    {300,  "Multiple Choice"},
+    {301,  "Moved Permanently"},
+    {302,  "Found"},
+    {303,  "See Other"},
+    {304,  "Not Modified"},
+    {305,  "Use Proxy"},
+    {306,  "unused"},
+    {307,  "Temporary Redirect"},
+    {308,  "Permanent Redirect"},
+    {400,  "Bad Request"},
+    {401,  "Unauthorized"},
+    {402,  "Payment Required"},
+    {403,  "Forbidden"},
+    {404,  "Not Found"},
+    {405,  "Method Not Allowed"},
+    {406,  "Not Acceptable"},
+    {407,  "Proxy Authentication Required"},
+    {408,  "Request Timeout"},
+    {409,  "Conflict"},
+    {410,  "Gone"},
+    {411,  "Length Required"},
+    {412,  "Precondition Failed"},
+    {413,  "Payload Too Large"},
+    {414,  "URI Too Long"},
+    {415,  "Unsupported Media Type"},
+    {416,  "Range Not Satisfiable"},
+    {417,  "Expectation Failed"},
+    {418,  "I'm a teapot"},
+    {421,  "Misdirected Request"},
+    {422,  "Unprocessable Entity"},
+    {423,  "Locked"},
+    {424,  "Failed Dependency"},
+    {425,  "Too Early"},
+    {426,  "Upgrade Required"},
+    {428,  "Precondition Required"},
+    {429,  "Too Many Requests"},
+    {431,  "Request Header Fields Too Large"},
+    {451,  "Unavailable For Legal Reasons"},
+    {501,  "Not Implemented"},
+    {502,  "Bad Gateway"},
+    {503,  "Service Unavailable"},
+    {504,  "Gateway Timeout"},
+    {505,  "HTTP Version Not Supported"},
+    {506,  "Variant Also Negotiates"},
+    {507,  "Insufficient Storage"},
+    {508,  "Loop Detected"},
+    {510,  "Not Extended"},
+    {511,  "Network Authentication Required"}
+};
+
+std::unordered_map<std::string, std::string> _mime_desc = {
+    {".aac",        "audio/aac"},
+    {".abw",        "application/x-abiword"},
+    {".arc",        "application/x-freearc"},
+    {".avi",        "video/x-msvideo"},
+    {".azw",        "application/vnd.amazon.ebook"},
+    {".bin",        "application/octet-stream"},
+    {".bmp",        "image/bmp"},
+    {".bz",         "application/x-bzip"},
+    {".bz2",        "application/x-bzip2"},
+    {".csh",        "application/x-csh"},
+    {".css",        "text/css"},
+    {".csv",        "text/csv"},
+    {".doc",        "application/msword"},
+    {".docx",       "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+    {".eot",        "application/vnd.ms-fontobject"},
+    {".epub",       "application/epub+zip"},
+    {".gif",        "image/gif"},
+    {".htm",        "text/html"},
+    {".html",       "text/html"},
+    {".ico",        "image/vnd.microsoft.icon"},
+    {".ics",        "text/calendar"},
+    {".jar",        "application/java-archive"},
+    {".jpeg",       "image/jpeg"},
+    {".jpg",        "image/jpeg"},
+    {".js",         "text/javascript"},
+    {".json",       "application/json"},
+    {".jsonld",     "application/ld+json"},
+    {".mid",        "audio/midi"},
+    {".midi",       "audio/x-midi"},
+    {".mjs",        "text/javascript"},
+    {".mp3",        "audio/mpeg"},
+    {".mpeg",       "video/mpeg"},
+    {".mpkg",       "application/vnd.apple.installer+xml"},
+    {".odp",        "application/vnd.oasis.opendocument.presentation"},
+    {".ods",        "application/vnd.oasis.opendocument.spreadsheet"},
+    {".odt",        "application/vnd.oasis.opendocument.text"},
+    {".oga",        "audio/ogg"},
+    {".ogv",        "video/ogg"},
+    {".ogx",        "application/ogg"},
+    {".otf",        "font/otf"},
+    {".png",        "image/png"},
+    {".pdf",        "application/pdf"},
+    {".ppt",        "application/vnd.ms-powerpoint"},
+    {".pptx",       "application/vnd.openxmlformats-officedocument.presentationml.presentation"},
+    {".rar",        "application/x-rar-compressed"},
+    {".rtf",        "application/rtf"},
+    {".sh",         "application/x-sh"},
+    {".svg",        "image/svg+xml"},
+    {".swf",        "application/x-shockwave-flash"},
+    {".tar",        "application/x-tar"},
+    {".tif",        "image/tiff"},
+    {".tiff",       "image/tiff"},
+    {".ttf",        "font/ttf"},
+    {".txt",        "text/plain"},
+    {".vsd",        "application/vnd.visio"},
+    {".wav",        "audio/wav"},
+    {".weba",       "audio/webm"},
+    {".webm",       "video/webm"},
+    {".webp",       "image/webp"},
+    {".woff",       "font/woff"},
+    {".woff2",      "font/woff2"},
+    {".xhtml",      "application/xhtml+xml"},
+    {".xls",        "application/vnd.ms-excel"},
+    {".xlsx",       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+    {".xml",        "application/xml"},
+    {".xul",        "application/vnd.mozilla.xul+xml"},
+    {".zip",        "application/zip"},
+    {".3gp",        "video/3gpp"},
+    {".3g2",        "video/3gpp2"},
+    {".7z",         "application/x-7z-compressed"}
+};
 
 class Util
 {
@@ -113,17 +251,24 @@ public:
         else if(c >= 'A' && c <= 'Z') return c - 'A';
         return -1;
     }
+    // REVIEW
     static std::string UrlDecode(const std::string& url, bool convert_plus_to_space)
     {
         // 遇到了%其后的两个字符转换为数字，第一个字符左移4位(乘16)加上第二个数字
         std::string ret;
         for(int i = 0; i < url.size(); i++)
         {
-            if(url[i] == '%')
+            if(url[i] == '+' && convert_plus_to_space)
+            {
+                ret += ' ';
+                continue;
+            }
+            if(url[i] == '%' && (i + 2) < url.size())
             {
                 char v1 = HextoI(url[i + 1]);
                 char v2 = HextoI(url[i + 2]);
                 char v = (v1 << 4) + v2;
+                ret += v;
                 i += 2;
                 continue;
             }
@@ -134,70 +279,6 @@ public:
     // 响应状态码的描述信息获取
     static std::string StatusDesc(int status)
     {
-        std::unordered_map<int, std::string> _status_msg = {
-            {100,  "Continue"},
-            {101,  "Switching Protocol"},
-            {102,  "Processing"},
-            {103,  "Early Hints"},
-            {200,  "OK"},
-            {201,  "Created"},
-            {202,  "Accepted"},
-            {203,  "Non-Authoritative Information"},
-            {204,  "No Content"},
-            {205,  "Reset Content"},
-            {206,  "Partial Content"},
-            {207,  "Multi-Status"},
-            {208,  "Already Reported"},
-            {226,  "IM Used"},
-            {300,  "Multiple Choice"},
-            {301,  "Moved Permanently"},
-            {302,  "Found"},
-            {303,  "See Other"},
-            {304,  "Not Modified"},
-            {305,  "Use Proxy"},
-            {306,  "unused"},
-            {307,  "Temporary Redirect"},
-            {308,  "Permanent Redirect"},
-            {400,  "Bad Request"},
-            {401,  "Unauthorized"},
-            {402,  "Payment Required"},
-            {403,  "Forbidden"},
-            {404,  "Not Found"},
-            {405,  "Method Not Allowed"},
-            {406,  "Not Acceptable"},
-            {407,  "Proxy Authentication Required"},
-            {408,  "Request Timeout"},
-            {409,  "Conflict"},
-            {410,  "Gone"},
-            {411,  "Length Required"},
-            {412,  "Precondition Failed"},
-            {413,  "Payload Too Large"},
-            {414,  "URI Too Long"},
-            {415,  "Unsupported Media Type"},
-            {416,  "Range Not Satisfiable"},
-            {417,  "Expectation Failed"},
-            {418,  "I'm a teapot"},
-            {421,  "Misdirected Request"},
-            {422,  "Unprocessable Entity"},
-            {423,  "Locked"},
-            {424,  "Failed Dependency"},
-            {425,  "Too Early"},
-            {426,  "Upgrade Required"},
-            {428,  "Precondition Required"},
-            {429,  "Too Many Requests"},
-            {431,  "Request Header Fields Too Large"},
-            {451,  "Unavailable For Legal Reasons"},
-            {501,  "Not Implemented"},
-            {502,  "Bad Gateway"},
-            {503,  "Service Unavailable"},
-            {504,  "Gateway Timeout"},
-            {505,  "HTTP Version Not Supported"},
-            {506,  "Variant Also Negotiates"},
-            {507,  "Insufficient Storage"},
-            {508,  "Loop Detected"},
-            {510,  "Not Extended"},
-            {511,  "Network Authentication Required"}
-        };
         auto it = _status_msg.find(status);
         if(it == _status_msg.end()) return "UnKnown";
         return it->second;
@@ -205,79 +286,6 @@ public:
     // 根据文件后缀名获取文件mime // TODO: mime
     static std::string ExtMime(const std::string& filename)
     {
-        std::unordered_map<std::string, std::string> _mime_desc = {
-            {".aac",        "audio/aac"},
-            {".abw",        "application/x-abiword"},
-            {".arc",        "application/x-freearc"},
-            {".avi",        "video/x-msvideo"},
-            {".azw",        "application/vnd.amazon.ebook"},
-            {".bin",        "application/octet-stream"},
-            {".bmp",        "image/bmp"},
-            {".bz",         "application/x-bzip"},
-            {".bz2",        "application/x-bzip2"},
-            {".csh",        "application/x-csh"},
-            {".css",        "text/css"},
-            {".csv",        "text/csv"},
-            {".doc",        "application/msword"},
-            {".docx",       "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
-            {".eot",        "application/vnd.ms-fontobject"},
-            {".epub",       "application/epub+zip"},
-            {".gif",        "image/gif"},
-            {".htm",        "text/html"},
-            {".html",       "text/html"},
-            {".ico",        "image/vnd.microsoft.icon"},
-            {".ics",        "text/calendar"},
-            {".jar",        "application/java-archive"},
-            {".jpeg",       "image/jpeg"},
-            {".jpg",        "image/jpeg"},
-            {".js",         "text/javascript"},
-            {".json",       "application/json"},
-            {".jsonld",     "application/ld+json"},
-            {".mid",        "audio/midi"},
-            {".midi",       "audio/x-midi"},
-            {".mjs",        "text/javascript"},
-            {".mp3",        "audio/mpeg"},
-            {".mpeg",       "video/mpeg"},
-            {".mpkg",       "application/vnd.apple.installer+xml"},
-            {".odp",        "application/vnd.oasis.opendocument.presentation"},
-            {".ods",        "application/vnd.oasis.opendocument.spreadsheet"},
-            {".odt",        "application/vnd.oasis.opendocument.text"},
-            {".oga",        "audio/ogg"},
-            {".ogv",        "video/ogg"},
-            {".ogx",        "application/ogg"},
-            {".otf",        "font/otf"},
-            {".png",        "image/png"},
-            {".pdf",        "application/pdf"},
-            {".ppt",        "application/vnd.ms-powerpoint"},
-            {".pptx",       "application/vnd.openxmlformats-officedocument.presentationml.presentation"},
-            {".rar",        "application/x-rar-compressed"},
-            {".rtf",        "application/rtf"},
-            {".sh",         "application/x-sh"},
-            {".svg",        "image/svg+xml"},
-            {".swf",        "application/x-shockwave-flash"},
-            {".tar",        "application/x-tar"},
-            {".tif",        "image/tiff"},
-            {".tiff",       "image/tiff"},
-            {".ttf",        "font/ttf"},
-            {".txt",        "text/plain"},
-            {".vsd",        "application/vnd.visio"},
-            {".wav",        "audio/wav"},
-            {".weba",       "audio/webm"},
-            {".webm",       "video/webm"},
-            {".webp",       "image/webp"},
-            {".woff",       "font/woff"},
-            {".woff2",      "font/woff2"},
-            {".xhtml",      "application/xhtml+xml"},
-            {".xls",        "application/vnd.ms-excel"},
-            {".xlsx",       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
-            {".xml",        "application/xml"},
-            {".xul",        "application/vnd.mozilla.xul+xml"},
-            {".zip",        "application/zip"},
-            {".3gp",        "video/3gpp"},
-            {".3g2",        "video/3gpp2"},
-            {".7z",         "application/x-7z-compressed"}
-        };
-
         size_t pos = filename.find_last_of('.');
         if(pos == std::string::npos) return "application/octet-stream"; // 文件为二进制流
         
@@ -404,9 +412,8 @@ public:
     bool Close() const
     {
         // 没有Connection字段或者值为close，就是短连接
-        bool ret = HasHeader("Connection");
-        if(ret == false || GetHeader("Connection") == "close") return true;
-        return false;
+        if(HasHeader("Connection") == true && GetHeader("Connection") == "keep-alive") return false;
+        return true;
     }
 };
 
@@ -461,11 +468,11 @@ public:
         _redirect_flag = true;
         _redirect_url = url;
     }
+    // 判断是否为短连接 true为短连接
     bool Close()
     {
-        bool ret = HasHeader("Connection");
-        if(ret == false || GetHeader("Connection") == "close") return true;
-        return false;
+        if(HasHeader("Connection") == true && GetHeader("Connection") == "keep-alive") return false;
+        return true;
     }
 };
 
@@ -583,8 +590,11 @@ private:
         _recv_status = RECV_HTTP_BODY;
         return true;
     }
-    bool ParseHttpHead(const std::string& line)
+    bool ParseHttpHead(std::string& line)
     {
+        // TODO: 去掉末尾回车换行
+        if(line.back() == '\n') line.pop_back();
+        if(line.back() == '\r') line.pop_back();
         size_t pos = line.find(": ");
         if(pos == std::string::npos)
         {
@@ -640,8 +650,10 @@ public:
     // 接收并解析HTTP请求
     void RecvHttpRequest(Buffer* buf)
     {
+        DBG_LOG("RecvHttpRequest: recv_status=%d, resp_status=%d, readable_size=%lu", _recv_status, _resp_status, buf->GetReadableSize());
+        
         // 不同的状态，做不同的事情，但是这不要break，应顺序依次执行
-        switch(_resp_status)
+        switch(_recv_status)
         {
             case RECV_HTTP_LINE : RecvHttpLine(buf);
             case RECV_HTTP_HEAD : RecvHttpHead(buf);
@@ -667,11 +679,19 @@ private:
         respons->SetContent(body, "text/html");
     }
     // 将HttpResponse中的要素按照http协议格式进行组织，发送
-    void onse(const ConnectionPtr& conn, const HttpRequest& request, HttpResponse& response)
+    void WriteResponse(const ConnectionPtr& conn, const HttpRequest& request, HttpResponse& response)
     {
         // 1、先完善头部字段
-        if(request.Close()) response.SetHeader("Connection", "close");
-        else response.SetHeader("Connection", "keep-alive");
+        if(request.Close())
+        {
+            DBG_LOG("CONNECTION IS CLOSE");
+            response.SetHeader("Connection", "close");
+        }
+        else
+        {
+            DBG_LOG("CONNECTION IS KEEP-ALIVE");
+            response.SetHeader("Connection", "keep-alive");
+        }
 
         if(response._body.empty() == false && response.HasHeader("Content-Length") == false) response.SetHeader("Content-Length", std::to_string(response._body.size()));
         if(response._body.empty() == false && response.HasHeader("Content-Type") == false) response.SetHeader("Content-Type", "application/octet-stream"); // TODO: application/octet-stream
@@ -699,7 +719,12 @@ private:
         //    特殊的请求，纯粹的目录: /，/image/，这种情况给后面默认追加一个index.html
         std::string req_path = _basedir + request._path; // 避免直接修改资源路径
         if(request._path.back() == '/') req_path += "index.html";
-        if(Util::IsRegular(req_path) == false) return false;
+        DBG_LOG("IsFileHandler: req_path=%s", req_path.c_str());
+        if(Util::IsRegular(req_path) == false) {
+            DBG_LOG("IsFileHandler: not regular file");
+            return false;
+        }
+        DBG_LOG("IsFileHandler: regular file");
         return true;
     }
     // 静态资源请求处理 -- 将静态资源文件的数据读取出来放到response的_body中，并设置MIME
@@ -708,7 +733,11 @@ private:
         std::string req_path = _basedir + request._path; // 避免直接修改资源路径
         if(request._path.back() == '/') req_path += "index.html";
         bool ret = Util::ReadFile(req_path, &response->_body);
-        if(ret == false) return;
+        if(ret == false)
+        {
+            response->_status = 404; 
+            return;
+        }
         std::string mime = Util::ExtMime(req_path);
         response->SetHeader("Content-Type", mime);
     }
@@ -726,6 +755,7 @@ private:
             if(ret == false) continue;
             return functor(request, response);
         }
+        response->_status = 404;
     }
     void Route(HttpRequest& request, HttpResponse* response)
     {
@@ -765,6 +795,8 @@ private:
                 // 进行错误响应，关闭连接
                 ErrorHandler(request, &response);
                 WriteResponse(conn, request, response);
+                context->ReSet(); // TODO: 不重置会造成循环
+                buf->MoveReadPosition(buf->GetReadableSize()); // 出错则清空缓冲区数据
                 conn->Shutdown();
                 return; 
             }
@@ -791,11 +823,15 @@ public:
         _server.SetConnectedCallBack(std::bind(&HttpServer::OnCnnected, this, std::placeholders::_1));  // TODO: std::placeholders::_1
         _server.SetMessageCallBack(std::bind(&HttpServer::OnMessage, this, std::placeholders::_1, std::placeholders::_2));
     }
-    void SetBaseDir(const std::string& path) { _basedir = path; }
-    void SetGet(const std::string& pattern, Handler& handler) { _get_route.emplace_back(std::make_pair(std::regex(pattern), handler)); }
-    void SetPost(const std::string& pattern, Handler& handler) { _post_route.emplace_back(std::make_pair(std::regex(pattern), handler)); }
-    void SetPut(const std::string& pattern, Handler& handler) { _put_route.emplace_back(std::make_pair(std::regex(pattern), handler)); }
-    void SetDelete(const std::string& pattern, Handler& handler) { _delete_route.emplace_back(std::make_pair(std::regex(pattern), handler)); }
+    void SetBaseDir(const std::string& path)
+    {
+        assert(Util::IsDirectory(path) == true);
+        _basedir = path;
+    }
+    void SetGet(const std::string& pattern, const Handler& handler) { _get_route.emplace_back(std::make_pair(std::regex(pattern), handler)); }
+    void SetPost(const std::string& pattern, const Handler& handler) { _post_route.emplace_back(std::make_pair(std::regex(pattern), handler)); }
+    void SetPut(const std::string& pattern, const Handler& handler) { _put_route.emplace_back(std::make_pair(std::regex(pattern), handler)); }
+    void SetDelete(const std::string& pattern, const Handler& handler) { _delete_route.emplace_back(std::make_pair(std::regex(pattern), handler)); }
     void SetThreadCount(int count) { _server.SetThreadCount(count); }
     void Listen() { _server.Start(); }
 private:
