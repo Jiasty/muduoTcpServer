@@ -94,7 +94,7 @@ public:
         if(size <= GetTailWritableSize() + GetHeadWritableSize())
         {
             uint64_t readableSize = GetReadableSize();
-            // TODO: copy接口。范围左闭右开
+            // copy接口范围左闭右开
             std::copy(GetReadPosition(), GetReadPosition() + readableSize, Begin());
             _read_index = 0;
             _write_index = readableSize;
@@ -208,13 +208,10 @@ private:
     uint64_t _write_index;  // 写相对偏移
 };
 
-// TODO: Any实现思想
 class Any
 {
 public:
-    Any()
-        :_content(nullptr)
-    {}
+    Any() :_content(nullptr) {}
 
     template<class T>
     Any(const T& val)
@@ -225,10 +222,7 @@ public:
         :_content(other._content ? other._content->clone() : nullptr) // 构造新对象，不是直接复制原对象指针
     {}
 
-    ~Any()
-    {
-        delete _content;
-    }
+    ~Any() { delete _content; }
 
     Any& Swap(Any& other)
     {
@@ -239,7 +233,7 @@ public:
     template<class T>
     T* Get()  // 返回子类对象保存的数据的指针
     {
-        // TODO
+        // TODO: typeid
         if(typeid(T) != _content->type()) // 判断请求的数据类型和保存的数据类型是否一致
             return nullptr; // 或断言直接退出程序都可
         return &((placeholder<T>*)_content)->_val;
@@ -272,9 +266,7 @@ private:
     class placeholder : public holder
     {
     public:
-        placeholder(const T& val)
-            :_val(val)
-        {}
+        placeholder(const T& val) :_val(val) {}
 
         virtual ~placeholder() = default;
 
@@ -319,10 +311,10 @@ public:
     // 绑定地址信息
     bool Bind(const std::string& ip, uint16_t port)
     {
-        struct sockaddr_in addr; // TODO: sockaddr_in和sockaddr的关系(C语言的多态TODO)
+        struct sockaddr_in addr;
         addr.sin_family = AF_INET;
         addr.sin_port = htons(port); // 将port从主机的字节顺序转换成网络的字节顺序
-        addr.sin_addr.s_addr = inet_addr(ip.c_str()); // TODO: inet_addr
+        addr.sin_addr.s_addr = inet_addr(ip.c_str()); // inet_addr将字符串转换为32位整数 // TODO: inet_pton替换它
 
         socklen_t addrlen = sizeof(struct sockaddr_in);
         int ret = bind(_sockfd, (const sockaddr*)&addr, addrlen);
@@ -366,7 +358,7 @@ public:
     int Accept()
     {
         // int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
-        int newfd = accept(_sockfd, nullptr, nullptr); // TODO
+        int newfd = accept(_sockfd, nullptr, nullptr);
         if(newfd < 0)
         {
             ERR_LOG("ACCEPT ERROR!");
@@ -378,9 +370,8 @@ public:
     ssize_t Recv(void* buf, size_t size, int flag = 0)
     {
         ssize_t ret = recv(_sockfd, buf, size, flag);
-        if(ret <= 0)
+        if(ret < 0)
         {
-            // TODO: EAGAIN EINTR
             // EAGAIN: 非阻塞套接字没有数据可读了，或者对端关闭了连接
             // EINTR: 系统调用被信号中断了
             if(errno == EAGAIN || errno == EINTR)
@@ -394,14 +385,14 @@ public:
     }
     ssize_t NonBlockRecv(void* buf, size_t size)
     {
-        return Recv(buf, size, MSG_DONTWAIT); // TODO: MSG_DONTWAIT
+        return Recv(buf, size, MSG_DONTWAIT); // MSG_DONTWAIT非阻塞recv
     }
 
     // 发送数据
     ssize_t Send(const void* buf, size_t size, int flag = 0)
     {
         ssize_t ret = send(_sockfd, buf, size, flag);
-        if(ret < 0) // TODO: <=0?
+        if(ret < 0)
         {
             if(errno == EAGAIN || errno == EINTR)
             {
@@ -445,7 +436,7 @@ public:
         ReuseAddress();
         return true;
     }
-    // 创建一个客户端连接 // TODO
+    // 创建一个客户端连接
     bool CreateClient(uint16_t port, const std::string& ip)
     {
         // 创建套接字
@@ -455,10 +446,10 @@ public:
         return true;
     }
     // 设置套接字选项 --- 开启地址端口重用(服务端能立即重用端口，跳过timewait阶段的保护)
-    void ReuseAddress() // TODO
+    void ReuseAddress()
     {
         int val = 1;
-        setsockopt(_sockfd, SOL_SOCKET, SO_REUSEADDR, (const void*)&val, sizeof(val));
+        setsockopt(_sockfd, SOL_SOCKET, SO_REUSEADDR, (const void*)&val, sizeof(val));  // Protocol Level: SOL_SOCKET通用 Socket 层
         val = 1;
         setsockopt(_sockfd, SOL_SOCKET, SO_REUSEPORT, (const void*)&val, sizeof(val));
     }
@@ -466,18 +457,18 @@ public:
     // 设置套接字阻塞属性--设置为非阻塞(缓冲区没有数据洛也不会阻塞)
     void SetNonBlock()
     {
-        int flag = fcntl(_sockfd, F_GETFL, 0);
-        fcntl(_sockfd, F_SETFL, flag | O_NONBLOCK);
+        int flag = fcntl(_sockfd, F_GETFL, 0);  // 返回套接字当前所有的状态标志位
+        fcntl(_sockfd, F_SETFL, flag | O_NONBLOCK);  // 追加非阻塞
     }
 private:
     int _sockfd;
 };
 
 
-using EventCallBack = std::function<void()>; // TODO: 连接事件回调函数类型
-class Poller; // TODO: 前向声明
+using EventCallBack = std::function<void()>; // 连接事件回调函数类型
+class Poller; // 前向声明
 class EventLoop;
-class Channel // TODO
+class Channel // 描述符具体事件管理
 {
 public:
     Channel(EventLoop* loop, int fd) : _loop(loop), _sockfd(fd), _events(0), _revents(0) {}
@@ -506,11 +497,13 @@ public:
     void DisableWrite() { _events &= ~EPOLLOUT; Update(); }
     // 关闭所有事件监控
     void DisableAll() { _events = 0; Update(); }
-    // 添加or移除事件监控 TODO
-    void Update(); // 类外实现
+
+    // 添加or移除事件监控: 由 EventLoop 去通知 Poller 更新底层的红黑树对应Channel的事件监控，Channel自己不改
+    // 类外实现
+    void Update();
     void Remove();
 
-    // 事件处理
+    // 事件处理 TODO
     void HandleEvent() 
     {
         if((_revents & EPOLLIN) || (_revents & EPOLLRDHUP) || (_revents & EPOLLPRI))
@@ -521,7 +514,6 @@ public:
         // 有可能会释放连接的操作一次只处理一个
         if(_revents & EPOLLOUT)
         {
-            // 不管什么事件都要调用
             if(_write_callback) _write_callback(); // 放any后，一旦出错就会释放连接，就调不到任意回调了
         }
         else if(_revents & EPOLLERR)
@@ -532,10 +524,10 @@ public:
         {
             if(_close_callback) _close_callback();
         }
-        if(_any_callback) _any_callback();
+        if(_any_callback) _any_callback(); // 不管什么事件都要调用
     }
 private:
-    // Poller* _poller; // TODO: 事件循环对象指针，后续会调用EventLoop接口
+    // Poller* _poller; // 事件循环对象指针，后续会调用EventLoop接口
     EventLoop* _loop;
 
     int _sockfd; // 事件关联的文件描述符
@@ -1416,7 +1408,7 @@ private:
 
 // Channel类前声明Poller只知道有Poller类，但不知道里面的成员
 // 所以需要在Poller类之后进行类外实现
-void Channel::Update() { _loop->UpdateEvent(this); } // TODO: 后边会调用EventLoop接口
+void Channel::Update() { _loop->UpdateEvent(this); }
 void Channel::Remove() { _loop->RemoveEvent(this); }
 
 void TimeWheel::TimerAdd(uint64_t id, uint32_t delay, const TaskFunc& cbFunc) 
