@@ -421,7 +421,7 @@ public:
 
     /////////////////////////////////////////////////////
 
-    // 创建一个服务端连接
+    // 创建一个服务端连接(面向server)
     bool CreateServer(uint16_t port, const std::string& ip = "0.0.0.0", bool block_flag = false)
     {
         // 创建套接字
@@ -436,7 +436,7 @@ public:
         ReuseAddress();
         return true;
     }
-    // 创建一个客户端连接
+    // 创建一个客户端连接(面向client)
     bool CreateClient(uint16_t port, const std::string& ip)
     {
         // 创建套接字
@@ -503,7 +503,7 @@ public:
     void Update();
     void Remove();
 
-    // 事件处理 TODO
+    // 事件处理 TODO: 结构优化
     void HandleEvent() 
     {
         if((_revents & EPOLLIN) || (_revents & EPOLLRDHUP) || (_revents & EPOLLPRI))
@@ -549,10 +549,10 @@ private:
     {
         // epoll_ctl(int epfd, int op, int fd, struct epoll_event *event);
         int fd = channel->GetFd();
-        struct epoll_event ev;
+        struct epoll_event ev;  // 告知内核的信息
         ev.data.fd = fd;
         ev.events = channel->GetEvent();
-        int ret = epoll_ctl(_epfd, op, fd, &ev); // TODO: epoll_ctl
+        int ret = epoll_ctl(_epfd, op, fd, &ev);
         if(ret < 0)
         {
             ERR_LOG("EPOLL_CTL ERROR!");
@@ -564,17 +564,17 @@ private:
     // 判断Channel是否已经添加了事件监控
     bool HasChannel(Channel* channel) const
     {
-        // return _channels.count(channel->GetFd()); // TODO
-        auto it = _channels.find(channel->GetFd());
-        if (it == _channels.end()) {
-            return false;
-        }
-        return true;
+        return _channels.count(channel->GetFd());
+        // auto it = _channels.find(channel->GetFd());
+        // if (it == _channels.end()) return false;
+        // return true;
     }
 public:
     Poller()
     {
-        _epfd = epoll_create(MAX_EPOLLEVENTS/*TODO: 随意给?*/); // TODO: epoll_create
+        // Since Linux 2.6.8, the size argument is ignored, but must be greater than zero
+        // _epfd = epoll_create(1);
+        _epfd = epoll_create1(EPOLL_CLOEXEC);
         if(_epfd < 0)
         {
             ERR_LOG("CREATE EPOLL ERROR!");
@@ -592,7 +592,7 @@ public:
             return Update(channel, EPOLL_CTL_MOD);
         }
         _channels.insert(std::make_pair(channel->GetFd(), channel));
-        return Update(channel, EPOLL_CTL_ADD);
+        Update(channel, EPOLL_CTL_ADD);
     }
     // 删除事件监控
     void RemoveChannel(Channel* channel)
@@ -607,7 +607,8 @@ public:
     void Poll(std::vector<Channel*>* active)
     {
         // epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout);
-        int nfds = epoll_wait(_epfd, _events, MAX_EPOLLEVENTS, -1); // TODO: epoll_wait
+        // 返回值为就绪的fd数
+        int nfds = epoll_wait(_epfd, _events, MAX_EPOLLEVENTS, -1); // -1: 挂起当前线程，直到有网络事件发生
         if(nfds < 0)
         {
             if(errno == EINTR)
@@ -618,13 +619,13 @@ public:
             ERR_LOG("EPOLL_WAIT ERROR: %s\n", strerror(errno));
             abort(); 
         }           
-
+        // 把底层发生的就绪事件，挨个、紧密地、依次放入_events数组
         for(int i = 0; i < nfds; ++i)
         {
             auto it = _channels.find(_events[i].data.fd);
             assert(it != _channels.end());
-            it->second->SetRevents(_events[i].events); // TODO: 事件类型
-            active->push_back(it->second); // TODO: 直接把Channel对象放到活跃连接列表中，后续EventLoop会调用Channel的事件处理函数
+            it->second->SetRevents(_events[i].events);  // 底层数据更新，更新上层数据
+            active->push_back(it->second); // 直接把Channel对象放到活跃连接列表中，后续EventLoop会调用Channel的事件处理函数
         }
     }
 
@@ -654,11 +655,10 @@ public:
         _release();  // 执行完后通知TimeWheel删除该任务，即哈希表_timers中删除
     }
 
-    void SetRelease(const ReleaseFunc& cbFunc)
-    {
-        // 释放任务得自己写
-        _release = cbFunc;
-    }
+    // 由TimeWheel调用，TimeWheel里设计释放任务
+    // 把该定时器在TimeWheel中 _timers 里的记录删掉
+    void SetRelease(const ReleaseFunc& cbFunc) { _release = cbFunc; }
+
     uint32_t GetTimeOut() const { return _timeout; }
     void Cancel() { _isDeleted = true; }
 
@@ -671,7 +671,7 @@ private:
 };
 
 // 时间轮里面存放TimerTask对象"指针"，也就是一个个定时任务，统一管理
-using TimerTaskPtr = std::shared_ptr<TimerTask>;
+using TimerTaskPtr = std::shared_ptr<TimerTask>;  // 使用shared_ptr可以使刷新直接复制到对应时间格
 using TimerTaskWeakPtr = std::weak_ptr<TimerTask>; // hash表存weak_ptr，不应增加引用计数，只为查找
 class TimeWheel
 {
@@ -679,15 +679,14 @@ private:
     void RemoveTimer(uint64_t id)
     {
         auto it = _timers.find(id);
-        if (it != _timers.end())
-        {
-            _timers.erase(it);
-        }
+        if (it != _timers.end()) { _timers.erase(it); }
     }
 
-    static int CreateTimerFd()
+    static int CreateTimerFd()  // static-->工厂函数,只需要和操作系统内核打交道
     {
-        int timerfd = timerfd_create(CLOCK_MONOTONIC, 0);
+        // Linux的优雅机制,将时间转换成了文件描述符(I/O 事件)
+        // CLOCK_MONOTONIC(单调递增时钟)不受系统时间更改的影响
+        int timerfd = timerfd_create(CLOCK_MONOTONIC, 0);  
         if(timerfd < 0)
         {
             ERR_LOG("TIMERFD CREATE FAILED!");
@@ -703,16 +702,17 @@ private:
         return timerfd;
     }
 
-    int ReadTimerFd()
+    // 调用ReadTimerFd除了获取超时次数，更关键的是为清空底层缓冲区,让内核不通知了
+    uint64_t ReadTimerFd()
     {
-        uint64_t times;
+        uint64_t times; // 读timerfd时，提供的缓冲区必须严格是8个字节
         int ret = read(_timerfd, &times, sizeof(times));
         if(ret < 0)
         {
             ERR_LOG("READ TIMERFD FAILED!");
             abort();
         }
-        return times; /////////////////// REVIEW
+        return times;
     }
 
     // 每秒执行一次
@@ -722,9 +722,10 @@ private:
         _wheel[_tick].clear(); // 清空该槽位的定时任务ptr，触发析构函数执行任务
     }
 
-    void OnTime() // TODO
+    // 强迫时间轮往前转动对应的次数
+    void OnTime()
     {
-        int times = ReadTimerFd();
+        uint64_t times = ReadTimerFd();
         for (int i = 0; i < times; i++) RunTimerTask();
     }
 
@@ -742,16 +743,12 @@ private:
         // 延迟(重新刷新)已存在的定时任务
         // 通过保存的定时器对象的weakPtr构造一个新的sharedPtr再添加到_wheel中
         auto it = _timers.find(id); // 迭代器查找
-        if (it == _timers.end())
-        {
-            return; // 没有找到该定时器任务
-        }
+        if (it == _timers.end()) return;
 
         TimerTaskPtr ptr = it->second.lock(); // 通过weakPtr构造sharedPtr
         int delay = ptr->GetTimeOut(); // 获取该定时器的超时时间
         _wheel[(_tick + delay) % _capacity].emplace_back(ptr);
 
-        // TODO
         // 正是由于刷新延迟时间是需要，可能会创建多个Ptr指向同一个TimerTask对象，所以此处采用sharedPtr
         // 而为了管理TimerTask对象的生命周期，必须以weakPtr存入哈希表_timers中，防止引用计数增加，导致TimerTask对象无法析构
     }
@@ -760,10 +757,7 @@ private:
     {
         // 取消定时任务
         auto it = _timers.find(id);
-        if (it == _timers.end())
-        {
-            return; // 没有找到该定时器任务
-        }
+        if (it == _timers.end()) return;
 
         TimerTaskPtr ptr = it->second.lock(); // 通过weakPtr构造sharedPtr
         if(ptr) ptr->Cancel(); // 标记该定时器任务已删除
@@ -781,22 +775,15 @@ public:
         _timer_channel->EnableRead();
     }
 
+    // 对外接口
     // 因为很多定时任务涉及到对连接的操作，需要考虑线程安全(_timers成员)
     // 加锁影响效率，不加锁则把对定时器的所有操作弄到一个线程执行即可
-    // TODO
     void TimerAdd(uint64_t id, uint32_t delay, const TaskFunc& cbFunc);
     void TimerRefresh(uint64_t id);
     void TimerCancel(uint64_t id);
 
-    // TODO: 存在线程安全问题，只可被EventLoop线程执行
-    bool HasTimer(uint64_t id)
-    {
-        auto it = _timers.find(id);
-        if (it == _timers.end()) return false;
-        return true;
-
-        // return _timers.count(id); 
-    }
+    // 存在线程安全问题，只可被EventLoop线程执行
+    bool HasTimer(uint64_t id) { return _timers.count(id); }
 
 private:
     int _tick; // 当前指针位置,指到哪就执行哪个槽的定时任务，然后释放
